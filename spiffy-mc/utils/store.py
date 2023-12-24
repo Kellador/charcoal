@@ -4,21 +4,11 @@ from collections.abc import MutableMapping
 from pathlib import Path
 from typing import Any, List, Tuple
 
-log = logging.getLogger(__name__)
-
-
-class Settings:
-    def __init__(
-        self, parent_directory: str, backup_directory: str, backup_maxAge: int
-    ) -> None:
-        self.parent_directory = Path(parent_directory)
-        self.backup_directory = Path(backup_directory)
-        self.backup_maxAge = backup_maxAge
+log = logging.getLogger(f'spiffy-mc.{__name__}')
 
 
 class Store(MutableMapping):
-    """MutableMapping for dynamic data storage, with async capabilities;
-    Parses data to and from json files.
+    """MutableMapping with functions to load from, and save to, json files.
     """
 
     def __init__(
@@ -28,6 +18,21 @@ class Store(MutableMapping):
         load: bool = True,
         ensure_entries: List[Tuple[str, Any]] | None = None,
     ):
+        """init
+
+        Parameters
+        ----------
+        file
+            path to persistent file,
+            will become a .json file even if given another suffix
+        boot_store, optional
+            path to a .json file, copied on first load, by default None
+        load, optional
+            whether to automattically attempt loading from given 'file' on init, by default True
+        ensure_entries, optional
+            list of (key, value) tuples that will be added to the mapping on init,
+            usable as alternative or in addition to 'boot_store', by default None
+        """
         self.file = file.with_suffix('.json')
         self.boot_store = boot_store
         if load:
@@ -42,7 +47,6 @@ class Store(MutableMapping):
 
     def load(self):
         if not self.file.exists():
-            log.info(f'{self.file} does not exist yet.')
             self.file.parent.mkdir(parents=True, exist_ok=True)
             if self.boot_store:
                 try:
@@ -55,11 +59,11 @@ class Store(MutableMapping):
                     log.critical(f'{self.boot_store} does not contain valid json!')
                     raise
                 else:
-                    log.info(f'Initialized from {self.boot_store}.')
+                    log.debug(f'Initialized from {self.boot_store}.')
                     return
             else:
                 self.store = {}
-                log.info('No boot store defined, initializing as empty dictionary.')
+                log.debug('No boot store defined, initializing as empty dictionary.')
                 return
 
         try:
@@ -72,7 +76,7 @@ class Store(MutableMapping):
             log.critical(f'{self.file} does not contain valid json!')
             raise
         else:
-            log.info(f'{self.file} loaded.')
+            log.debug(f'{self.file} loaded.')
 
     def save(self):
         self.file.parent.mkdir(parents=True, exist_ok=True)

@@ -1,3 +1,3 @@
 import logging
 
-logging.getLogger(__name__).addHandler(logging.NullHandler())
+logging.getLogger('spiffy-mc').addHandler(logging.NullHandler())
