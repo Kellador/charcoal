@@ -17,12 +17,7 @@ from .exceptions import (
     RconLoginDetailsMissing,
     RconSettingsError,
 )
-
-
-class CharcoalStatus(Enum):
-    UNTRACKED = -1
-    DISABLED = 0
-    ENABLED = 1
+from .classes import CharcoalStatus, Rcon_Settings
 
 
 def discover_servers(path: str | Path) -> Dict[str, List[Path]]:
@@ -199,7 +194,7 @@ def get_backup_spec(
             raise NothingToBackup(serverdir)
 
 
-def get_procedures(serverdir: Path) -> dict[str, Any]:  # TODO - Procedure Type
+def get_procedures(serverdir: Path) -> dict[str, Any]:
     """Search for, and parse, the 'charcoal_procedures' file for a given server directory.
 
     Parameters
@@ -209,7 +204,7 @@ def get_procedures(serverdir: Path) -> dict[str, Any]:  # TODO - Procedure Type
 
     Returns
     -------
-        procedures # TODO
+        procedures in raw json format
 
     Raises
     ------
@@ -228,7 +223,7 @@ def get_procedures(serverdir: Path) -> dict[str, Any]:  # TODO - Procedure Type
     return procedures
 
 
-async def get_rcon_spec(serverdir: Path) -> dict[str, str]:  # TODO - RCON Type
+async def get_rcon_settings(serverdir: Path) -> Rcon_Settings:
     """Search for, and parse, the 'server.properties' file for a given server directory.
 
     Parameters
@@ -238,7 +233,7 @@ async def get_rcon_spec(serverdir: Path) -> dict[str, str]:  # TODO - RCON Type
 
     Returns
     -------
-        rcon info # TODO
+        Rcon_Spec object holding parsed rcon settings
 
     Raises
     ------
@@ -266,21 +261,29 @@ async def get_rcon_spec(serverdir: Path) -> dict[str, str]:  # TODO - RCON Type
             ]
         if len(lines) != 3:
             raise RconSettingsError(serverdir)
-        return {l[0]: l[1] for l in lines}
+        
+        parsed = {l[0]: l[1] for l in lines}
+        
+        try:
+            enabled = True if parsed['enable-rcon'] == 'true' else False
+        except KeyError:
+            raise RconSettingsError(serverdir)
+        
+        try:
+            port = int(parsed['rcon.port'])
+            password = parsed['rcon.password']
+        except KeyError:
+            raise RconLoginDetailsMissing(serverdir)
+        
+        return enabled, port, password
 
     loop = asyncio.get_event_loop()
-    info = await loop.run_in_executor(None, _extract)
+    enabled, port, password = await loop.run_in_executor(None, _extract)
 
-    if enabled := info['enable-rcon']:
-        if enabled == 'false':
-            raise RconNotEnabled(serverdir)
-    else:
-        raise RconSettingsError(serverdir)
+    if not enabled:
+        raise RconNotEnabled(serverdir)
 
-    if info['rcon.port'] and info['rcon.password']:
-        return info
-    else:
-        raise RconLoginDetailsMissing(serverdir)
+    return Rcon_Settings(enabled=enabled, port=int(port), password=password)
 
 
 def get_crashreport(serverdir: Path, nthlast: int = 0) -> Path:
