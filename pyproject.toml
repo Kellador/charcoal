@@ -1,7 +1,7 @@
 [tool.poetry]
-name = "spiffy-mc"
+name = "charcoal"
 version = "0.1.0"
-description = "spiffy-mc is an opinionated, async library for Minecraft server administration tasks"
+description = "charcoal is an opinionated, async library for Minecraft server administration tasks"
 authors = ["kellador"]
 license = "GNU GPLv3"
 readme = "README.md"

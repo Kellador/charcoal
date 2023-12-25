@@ -1,2 +1,2 @@
-# spiffy-mc
-An opinionated library, and accompanying CLI, for Minecraft server administration
+# charcoal
+an opinionated, async library for Minecraft server administration tasks

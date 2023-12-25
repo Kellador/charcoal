@@ -17,17 +17,17 @@ class LoggedException(Exception):
 
 class ServerNotFound(LoggedException):
     def __init__(self, sdir: Path) -> None:
-        super().__init__(f'{sdir} does not exist', log.error)
+        super().__init__(f'{sdir} does not exist', log.warning)
 
 
 class NoInvocation(LoggedException):
     def __init__(self, sdir: Path) -> None:
-        super().__init__(f'{sdir} does not contain a \'spiffy_invocation\' file', log.error)
+        super().__init__(f'{sdir} does not contain a \'spiffy_invocation\' file', log.warning)
 
 
 class ParentDirMissing(LoggedException):
     def __init__(self, path: Path) -> None:
-        super().__init__(f'{path} does not exist!', log.error)
+        super().__init__(f'{path} does not exist!', log.warning)
 
 
 class NothingToBackup(LoggedException):
@@ -39,9 +39,24 @@ class NothingToBackup(LoggedException):
         )
 
 
+class ServerStartFailed(LoggedException):
+    def __init__(self, server: str, message: str) -> None:
+        super().__init__(f'starting of {server} has failed!', log.error)
+
+
+class ServerStopFailed(LoggedException):
+    def __init__(self, server: str, message: str) -> None:
+        super().__init__(f'stopping of {server} has failed!', log.error)
+
+
+class ServerRestartFailed(LoggedException):
+    def __init__(self, server: str, message: str) -> None:
+        super().__init__(f'restart of {server} has failed!', log.error)
+
+
 class TerminationFailed(LoggedException):
     def __init__(self, server: str) -> None:
-        super().__init__(f'termination of {server} failed!', log.warning)
+        super().__init__(f'termination of {server} failed!', log.error)
 
 
 class ServerPropertiesMissing(LoggedException):

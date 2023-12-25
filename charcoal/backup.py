@@ -4,57 +4,6 @@ import logging
 log = logging.getLogger(f'spiffy-mc.{__name__}')
 
 
-def get_backup(serverdir: Path) -> dict[str, List[Path]]:
-    """Get all directories to backup for a given server.
-
-    Parameters
-    ----------
-    serverdir
-        directory of server to perform backup on
-
-    Returns
-    -------
-        a dict of paths to include and exclude
-    """
-
-    world = serverdir / 'world'
-    sb = serverdir / 'spiffy_backup'
-
-    def _read_specification() -> dict[str, List[Path]]:
-        with sb.open() as file:
-            entries = file.read().split()
-
-        specs = {'include': [], 'exclude': []}
-
-        for e in entries:
-            if e.startswith('-'):
-                e_path = serverdir / e[1:]
-                if e_path.exists():
-                    specs['exclude'].append(e_path)
-            else:
-                if e.startswith('+'):  # Seems logical one might do this, so why not?!
-                    e = e[1:]
-                i_path = serverdir / e
-                if i_path.exists():
-                    specs['include'].append(i_path)
-
-        return specs
-
-    match world.exists(), sb.exists():
-        case True, True:
-            specification = _read_specification()
-            if world not in specification['include']:
-                specification['include'].append(world)
-        case True, False:
-            specification = {'include': [world], 'exclude': []}
-        case False, True:
-            specification = _read_specification()
-        case False, False:
-            raise NothingToBackup(serverdir)
-
-    return specification
-
-
 def backup(cfg: 'Settings', server: str, specific_path: str | None = None):
     """Perform backup of a given server.
 
