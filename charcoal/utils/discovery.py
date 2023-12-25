@@ -1,115 +1,136 @@
 import asyncio
-import logging
+from enum import Enum
+import json
+from pathlib import Path
+from typing import Any, Dict, List, Tuple
 
-log = logging.getLogger(f'spiffy-mc.{__name__}')
+from .exceptions import (
+    NoProcedures,
+    NoReportDirectory,
+    NoReports,
+    ParentDirMissing,
+    NoInvocation,
+    RconNotEnabled,
+    ServerNotFound,
+    NothingToBackup,
+    ServerPropertiesMissing,
+    RconLoginDetailsMissing,
+    RconSettingsError,
+)
 
 
-def discover_servers(path: str | Path) -> List[Path]:
-    """Discover minecraft server locations.
+class CharcoalStatus(Enum):
+    UNTRACKED = -1
+    DISABLED = 0
+    ENABLED = 1
 
-    Discovery is dependent on the minecraft server having
-    a 'spiffy_invocation' file in their directory.
+
+def discover_servers(path: str | Path) -> Dict[str, List[Path]]:
+    """Search a directory for immediate subdirectories containing a server tracked by charcoal,
+    as indicated by the presence of a 'charcoal_enabled' or 'charcoal_disabled' file.
+
+    If both files are present, 'charcoal_enabled' takes presedence!
 
     Parameters
     ----------
     path
-        parent directory of minecraft server directories,
-        only one level down from this parent is searched
-
-        'SpiffyPathNotFound' is raised if this directory
-        does not exist!
+        path of directory to search for immediate subdirectories in
 
     Returns
     -------
-        A list of paths to discovered minecraft servers
+        mapping of 'enabled' and 'disabled' servers, identified by their base path
+
+    Raises
+    ------
+    ParentDirMissing
+        raised when given path does not exist
     """
 
     serverdir = Path(path)
     if not serverdir.exists():
-        raise SpiffyPathNotFound(serverdir)
+        raise ParentDirMissing(serverdir)
 
-    servers = []
+    servers = {'enabled': [], 'disabled': []}
 
     for d in serverdir.iterdir():
         if d.is_dir():
-            si = d / 'spiffy_invocation'
-            if si.exists():
-                servers.append(d)
+            se = d / 'charcoal_enabled'
+            if se.exists():
+                servers['enabled'].append(se)
+                continue
+            sd = d / 'charcoal_disabled'
+            if sd.exists():
+                servers['disabled'].append(sd)
+                continue
 
     return servers
 
 
-def find_server(path: str | Path, name: str) -> Path:
-    """Find a minecraft server by it's given name and directory.
-
-    Discovery is dependent on the minecraft server having
-    a 'spiffy_invocation' file in their directory.
+def find_server(path: str | Path, name: str) -> Tuple[Path, CharcoalStatus]:
+    """Search for a specific server, by searching in the given directory for immediate subdirectories matching the given name.
 
     Parameters
     ----------
     path
-        parent directory of minecraft server directory
-
-        'SpiffyPathNotFound' is raised if this directory
-        does not exist!
+        path of directory to search for immediate subdirectories in
     name
-        name of server, must be identical to it's directory
+        name of server to search for, it's base directory must match this name
 
     Returns
     -------
-        the path to the server
+        a tuple of the found server's path and it's status regarding charcoal integration
 
-        SpiffyNameNotFound is raised if no server by
-        the given name is found
-
-        SpiffyInvocationMissing is raised if server directory
-        exists, but doesn't contain a 'spiffy_invocation'
+    Raises
+    ------
+    ParentDirMissing
+        raised if given directory does not exist
+    ServerNotFound
+        raised if no server matching the given name can be found
     """
 
     serverdir = Path(path)
     if not serverdir.exists():
-        raise SpiffyPathNotFound(serverdir)
+        raise ParentDirMissing(serverdir)
 
     sdir = serverdir / name
     if sdir.exists():
-        si = sdir / 'spiffy_invocation'
-        if si.exists():
-            return sdir
-        else:
-            raise SpiffyInvocationMissing(sdir)
+        se = sdir / 'charcoal_enabled'
+        if se.exists():
+            return (sdir, CharcoalStatus.ENABLED)
+        sd = sdir / 'charcoal_disabled'
+        if sd.exists():
+            return (sdir, CharcoalStatus.DISABLED)
+        return (sdir, CharcoalStatus.UNTRACKED)
     else:
-        raise SpiffyNameNotFound(name)
+        raise ServerNotFound(sdir)
 
 
-async def get_invocation(serverdir: Path, split=False) -> str | List[str]:
-    """Reads in the 'spiffy_invocation' file for a given server.
+async def get_invocation(serverdir: Path) -> str | List[str]:
+    """Look for, and parse, the 'charcoal_invocation' file for a given server directory.
 
     Parameters
     ----------
     serverdir
-        path to server,
-        use 'find_server' to get this
-
-    split, optional
-        keep invocation as a list of components seperated
-        by whitespace/newlines
+        path to server base directory
 
     Returns
     -------
-        the contents of 'spiffy_invocation' stripped of newlines
-        and superfluous whitespace either as a single string
-        or a list of components if split=True
+        extracted server start invocation/command
+
+    Raises
+    ------
+    NoInvocation
+        raised if 'charcoal_invocation' file does not exist
     """
 
-    si = serverdir / 'spiffy_invocation'
+    si = serverdir / 'charcoal_invocation'
+
+    if not si.exists():
+        raise NoInvocation(serverdir)
 
     def _extract():
         with si.open() as file:
             _invocation = file.read().split()
-
-        if split:
-            return _invocation
-        else:
             return ' '.join(_invocation)
 
     loop = asyncio.get_running_loop()
@@ -117,21 +138,30 @@ async def get_invocation(serverdir: Path, split=False) -> str | List[str]:
     return invocation
 
 
-def get_backup(serverdir: Path) -> dict[str, List[Path]]:
-    """Get all directories to backup for a given server.
+def get_backup_spec(
+    serverdir: Path, always_include_world: bool = True
+) -> dict[str, List[Path]]:
+    """Search for, and parse, the 'charcoal_backup' file for a given server directory.
 
     Parameters
     ----------
     serverdir
-        directory of server to perform backup on
+        path to server base directory
+    always_include_world, optional
+        whether or not to explicitly include the 'world' directory, by default True
 
     Returns
     -------
-        a dict of paths to include and exclude
+        mapping of explicitly included and excluded paths
+
+    Raises
+    ------
+    NothingToBackup
+        raised if 'world' isn't explicitly included | does not exist, and 'charcoal_backup' file does not exist
     """
 
     world = serverdir / 'world'
-    sb = serverdir / 'spiffy_backup'
+    sb = serverdir / 'charcoal_backup'
 
     def _read_specification() -> dict[str, List[Path]]:
         with sb.open() as file:
@@ -153,38 +183,44 @@ def get_backup(serverdir: Path) -> dict[str, List[Path]]:
 
         return specs
 
-    match world.exists(), sb.exists():
+    match (world.exists() and always_include_world), sb.exists():
         case True, True:
             specification = _read_specification()
             if world not in specification['include']:
                 specification['include'].append(world)
+            return specification
         case True, False:
             specification = {'include': [world], 'exclude': []}
+            return specification
         case False, True:
             specification = _read_specification()
-        case False, False:
+            return specification
+        case _, _:
             raise NothingToBackup(serverdir)
 
-    return specification
 
-
-def get_procedures(serverdir: Path) -> dict[str, Any] | None:
-    """Read special procedures file for a given server.
+def get_procedures(serverdir: Path) -> dict[str, Any]:  # TODO - Procedure Type
+    """Search for, and parse, the 'charcoal_procedures' file for a given server directory.
 
     Parameters
     ----------
     serverdir
-        directory of server to get procedures for
+        path to server base directory
 
     Returns
     -------
-        a dict of procedures <format wip>
+        procedures # TODO
+
+    Raises
+    ------
+    NoProcedures
+        raised if 'charcoal_procedures' file does not exist
     """
 
-    sp = serverdir / 'spiffy_procedures'
+    sp = serverdir / 'charcoal_procedures'
 
     if not sp.exists():
-        return
+        raise NoProcedures(serverdir)
 
     with sp.open() as file:
         procedures = json.load(file)
@@ -192,82 +228,96 @@ def get_procedures(serverdir: Path) -> dict[str, Any] | None:
     return procedures
 
 
-async def get_rcon_info(self, server: str) -> dict[str, str] | None:
-        try:
-            serverdir = find_server(self.parent_directory, server)
-        except (SpiffyPathNotFound, SpiffyNameNotFound) as e:
-            log.warning(e.message)
-            raise e
-        except SpiffyInvocationMissing as e:
-            serverdir = e.path
-
-        props = serverdir / 'server.properties'
-        if props.exists():
-
-            def _extract():
-                with props.open() as _props:
-                    lines = [
-                        line.rstrip().split('=')
-                        for line in _props
-                        if line.startswith('rcon.') or line.startswith('enable-rcon')
-                    ]
-                if len(lines) != 3:
-                    raise RconSettingsError(server)
-                return {l[0]: l[1] for l in lines}
-
-            loop = asyncio.get_event_loop()
-            info = await loop.run_in_executor(None, _extract)
-
-            if enabled := info['enable-rcon']:
-                if enabled == 'false':
-                    raise RconNotEnabled(server)
-            else:
-                raise RconSettingsError(server)
-
-            if info['rcon.port'] and info['rcon.password']:
-                log.info(f'Extracted rcon information from {props}')
-                return info
-            else:
-                raise RconLoginDetailsMissing(server)
-
-        else:
-            raise ServerPropertiesMissing(server)
-        
-        
-def get_crashreport(server: Path, nthlast: int = 0) -> Path | None:
-    """Retrieves the path of the nth latest crashreport for a given server.
+async def get_rcon_spec(serverdir: Path) -> dict[str, str]:  # TODO - RCON Type
+    """Search for, and parse, the 'server.properties' file for a given server directory.
 
     Parameters
     ----------
-    server
-        path to server
-    nthlast, optional
-        reports sorted newest to oldest, newest has index 0, by default 0
+    serverdir
+        path to server base directory
 
     Returns
     -------
-        path of selected report
+        rcon info # TODO
 
     Raises
     ------
-    FileNotFoundError
-        raised when crash-reports directory doesn't exist
-    IndexError
-        raised when nthlast does not exist
+    ServerPropertiesMissing
+        raised if 'server.properties' file does not exist
+    RconSettingsError
+        raised if 'server.properties' does not contain all necessary rcon entries
+    RconNotEnabled
+        raised if 'enable-rcon' is set to 'false' in 'server.properties'
+    RconLoginDetailsMissing
+        raised if rcon port and/or password are not set in 'server.properties'
     """
 
-    reports_dir = server / 'crash-reports'
+    props = serverdir / 'server.properties'
+
+    if not props.exists():
+        raise ServerPropertiesMissing(serverdir)
+
+    def _extract():
+        with props.open() as _props:
+            lines = [
+                line.rstrip().split('=')
+                for line in _props
+                if line.startswith('rcon.') or line.startswith('enable-rcon')
+            ]
+        if len(lines) != 3:
+            raise RconSettingsError(serverdir)
+        return {l[0]: l[1] for l in lines}
+
+    loop = asyncio.get_event_loop()
+    info = await loop.run_in_executor(None, _extract)
+
+    if enabled := info['enable-rcon']:
+        if enabled == 'false':
+            raise RconNotEnabled(serverdir)
+    else:
+        raise RconSettingsError(serverdir)
+
+    if info['rcon.port'] and info['rcon.password']:
+        return info
+    else:
+        raise RconLoginDetailsMissing(serverdir)
+
+
+def get_crashreport(serverdir: Path, nthlast: int = 0) -> Path:
+    """Search for latest, or other, crash report in given server directory.
+
+    Parameters
+    ----------
+    serverdir
+        path to server base directory
+    nthlast, optional
+        n-th last report to look for, by default 0 (latest)
+
+    Returns
+    -------
+        path to crash report
+
+    Raises
+    ------
+    NoReportDirectory
+        raised if 'crash-reports' directory does not exist
+    NoReports
+        raised if no crash reports exist
+    """
+
+    reports_dir = serverdir / 'crash-reports'
 
     if not reports_dir.exists():
-        raise FileNotFoundError
+        raise NoReportDirectory(serverdir)
 
     reports = list(reports_dir.glob('*.txt'))
 
     if reports:
         reports.sort(key=lambda p: p.stat().st_mtime, reverse=True)
-        try:
-            return reports[nthlast]
-        except IndexError:
-            raise IndexError
+
+        if (nthlast + 1) > len(reports):
+            nthlast = len(reports) - 1
+
+        return reports[nthlast]
     else:
-        return None
+        raise NoReports(serverdir)
