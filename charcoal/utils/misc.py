@@ -12,11 +12,13 @@ def buildCountdownSteps(cntd):
     """
 
     countpat = re.compile(
-        '(?P<time>\d+)((?P<minutes>[m].*)|(?P<seconds>[s].*))', flags=re.I
+        r'(?P<time>\d+)((?P<minutes>[m].*)|(?P<seconds>[s].*))', flags=re.I
     )
     steps = []
     for i, step in enumerate(cntd):
         s = countpat.search(step)
+        if s is None:
+            raise  # TODO
         if s.group('minutes'):
             time = int(s.group('time'))
             secs = time * 60
@@ -29,6 +31,8 @@ def buildCountdownSteps(cntd):
             steps.append((time, secs, unit))
         else:
             st = countpat.search(cntd[i + 1])
+            if st is None:
+                raise  # TODO
             if st.group('minutes'):
                 t = int(st.group('time')) * 60
             else:
