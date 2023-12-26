@@ -107,16 +107,16 @@ class OldReport(LoggedException):
             f'Latest crashreport found in {sdir} is older than {age} hours!',
             log.warning,
         )
-        
-        
+
+
 class NoReportDirectory(LoggedException):
     def __init__(self, sdir: Path) -> None:
         super().__init__(
             f'{sdir} contains no crash-reports directory',
             log.warning,
         )
-        
-        
+
+
 class NoReports(LoggedException):
     def __init__(self, sdir: Path) -> None:
         super().__init__(
@@ -128,5 +128,22 @@ class NoReports(LoggedException):
 class NoProcedures(LoggedException):
     def __init__(self, sdir: Path) -> None:
         super().__init__(
-            f'{sdir} contains no \'charcoal_procedures\' file', log.warning
+            f'{sdir} contains no \'charcoal_procedures\' file', 
+            log.warning
+        )
+
+
+class ProcessInvalid(LoggedException):
+    def __init__(self, server: str) -> None:
+        super().__init__(
+            f'{server} process held is no longer valid!', 
+            log.info
+        )
+
+
+class ProcessNotFound(LoggedException):
+    def __init__(self, server: str) -> None:
+        super().__init__(
+            f'No process for {server} found!',
+            log.info
         )
