@@ -1,6 +1,5 @@
 import asyncio
 import logging
-from typing import List
 
 import psutil
 
@@ -15,17 +14,10 @@ log = logging.getLogger(f'spiffy-mc.{__name__}')
 
 
 class ServerProcess:
-    def __init__(self, servername: str) -> None:
-        self.name = servername
-        try:
-            self._post_init()
-        except:
-            raise
-        
+    def __init__(self, name: str) -> None:
+        self.name = name
+
     def _post_init(self):
-        if self.name[-4:] != '.jar':
-            name = f'{self.name}.jar'
-        
         for process in psutil.process_iter(
             attrs=[
                 'cmdline',
@@ -47,33 +39,49 @@ class ServerProcess:
                     self.memory_percent = process.info['memory_percent']  # type: ignore
         else:
             raise ProcessNotFound(self.name)
-        
-    def is_running(self) -> bool:
+
+    @classmethod
+    async def find(cls, name: str):
+        """Look for a server's process and wrap it in a ServerProcess,
+        capable of interacting with the server process
+
+        Parameters
+        ----------
+        name
+            name of the server, this should be a unique identifier;
+            it must be present in the commandline used to start the server process
+
+        Returns
+        -------
+            a ServerProcess
+
+        Raises
+        ------
+        ProcessNotFound
+            raised if no process can be found with the given name in it's commandline
+        """
+
+        self = cls(name)
+        try:
+            await asyncio.get_running_loop().run_in_executor(None, self._post_init)
+        except:
+            raise
+        return self
+
+    async def is_running(self) -> bool:
         """Check if process is present in current process list.
 
         Returns
         -------
             whether process is running or not
         """
-        
-        return self.process.is_running()
-    
-    def terminate(self, timeout: int = 3):
-        """Terminate server process, and all its children.
 
-        Parameters
-        ----------
-        timeout, optional
-            time in seconds to wait for termination,
-            once for sig term, and again for sig kill,
-            if sig term failed, by default 3
+        running = await asyncio.get_running_loop().run_in_executor(
+            None, self.process.is_running
+        )
+        return running
 
-        Raises
-        ------
-        TerminationFailed
-            raised if process or process children remain after sig term and sig kill
-        """
-        
+    def _terminate(self, timeout: int = 3):
         processes = self.process.children(recursive=True)
         processes.append(self.process)
         for p in processes:
@@ -91,26 +99,48 @@ class ServerProcess:
         if alive:
             raise TerminationFailed(self.name)
 
+    async def terminate(self, timeout: int = 3):
+        """Terminate server process, and all its children.
 
-def checkServerRunning(servername: str) -> bool:
+        Parameters
+        ----------
+        timeout, optional
+            time in seconds to wait for termination,
+            once for sig term, and again for sig kill,
+            if sig term failed, by default 3
+
+        Raises
+        ------
+        TerminationFailed
+            raised if process or process children remain after sig term and sig kill
+        """
+
+        try:
+            await asyncio.get_running_loop().run_in_executor(
+                None, self._terminate, timeout
+            )
+        except:
+            raise
+
+
+def checkServerRunning(name: str) -> bool:
     """Check if server process is present in current process list.
-    
+
     Use this if you only need to check if a server process exists once or twice;
     for all other purposes it'll be more efficient to grab a `ServerProcess`
-    object as that will allow you to do more with the process as well as repeatedly
-    check if it is running.
 
     Parameters
     ----------
     servername
-        name of server to check
+        name of the server, this should be a unique identifier;
+        it must be present in the commandline used to start the server process
 
     Returns
     -------
         whether a process for given server name was found or not
     """
-    
+
     for process in psutil.process_iter(attrs=['cmdline']):
-        if f'{servername}.jar' in process.info['cmdline']:  # type: ignore
+        if name in process.info['cmdline']:  # type: ignore
             return True
     return False
